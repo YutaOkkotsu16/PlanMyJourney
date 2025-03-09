@@ -1,5 +1,5 @@
 // src/components/trip/TripForm.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, Controller } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
@@ -26,6 +26,7 @@ import { useLocations } from '../../hooks/entityHooks';
 import tripService from '../../services/tripService';
 import Loading from '../common/Loading';
 import ErrorMessage from '../common/ErrorMessage';
+import { useJsApiLoader, Autocomplete as GoogleAutocomplete } from '@react-google-maps/api';
 
 // Form validation schema
 const schema = yup.object().shape({
@@ -41,8 +42,8 @@ const schema = yup.object().shape({
     .min(yup.ref('startDate'), 'End date must be after start date')
     .required('End date is required')
     .typeError('Please enter a valid date'),
-  startLocationId: yup.number().required('Start location is required'),
-  endLocationId: yup.number().required('End location is required'),
+  startLocationId: yup.string().required('Start location is required'),
+  endLocationId: yup.string().required('End location is required'),
   status: yup.string().required('Status is required'),
   description: yup.string(),
 });
@@ -58,23 +59,37 @@ const tripStatuses = [
 
 function TripForm({ trip = null, isEdit = false }) {
   const navigate = useNavigate();
+  
+  // All hooks need to be called before any conditional returns
+  // State hooks
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
   const [success, setSuccess] = useState(false);
+  const [startLocation, setStartLocation] = useState(trip?.startLocation || null);
+  const [endLocation, setEndLocation] = useState(trip?.endLocation || null);
   
-  // Fetch locations for dropdowns
+  // Ref hooks
+  const startAutocompleteRef = useRef(null);
+  const endAutocompleteRef = useRef(null);
+  
+  // Other hooks
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY,
+    libraries: ['places']
+  });
+  
   const { 
     loading: locationsLoading, 
     error: locationsError, 
     data: locations = [] 
   } = useLocations();
 
-  // Initialize form
   const {
     control,
     handleSubmit,
     reset,
     setValue,
+    trigger,
     formState: { errors },
   } = useForm({
     resolver: yupResolver(schema),
@@ -89,7 +104,7 @@ function TripForm({ trip = null, isEdit = false }) {
     },
   });
 
-  // Update form with trip data when editing
+  // Use effects - still happen before any conditional returns
   useEffect(() => {
     if (trip) {
       reset({
@@ -101,32 +116,114 @@ function TripForm({ trip = null, isEdit = false }) {
         status: trip.status || 'PLANNED',
         description: trip.description || '',
       });
+      
+      // Also set the full location objects
+      if (trip.startLocation) {
+        setStartLocation(trip.startLocation);
+      }
+      if (trip.endLocation) {
+        setEndLocation(trip.endLocation);
+      }
     }
   }, [trip, reset]);
 
-  // Handle form submission
+  // Handle place change functions
+  const handleStartPlaceChanged = () => {
+    if (startAutocompleteRef.current) {
+      const place = startAutocompleteRef.current.getPlace();
+      if (place && place.geometry) {
+        const locationData = {
+          id: place.place_id,
+          name: place.name || place.formatted_address,
+          address: place.formatted_address,
+          lat: place.geometry.location.lat(),
+          lng: place.geometry.location.lng()
+        };
+        setStartLocation(locationData);
+        setValue('startLocationId', place.place_id);
+      }
+    }
+  };
+
+  const handleEndPlaceChanged = () => {
+    if (endAutocompleteRef.current) {
+      const place = endAutocompleteRef.current.getPlace();
+      if (place && place.geometry) {
+        const locationData = {
+          id: place.place_id,
+          name: place.name || place.formatted_address,
+          address: place.formatted_address,
+          lat: place.geometry.location.lat(),
+          lng: place.geometry.location.lng()
+        };
+        setEndLocation(locationData);
+        setValue('endLocationId', place.place_id);
+      }
+    }
+  };
+
   const onSubmit = async (data) => {
     try {
+      // Trigger validation for location fields
+      const isValid = await trigger(['startLocationId', 'endLocationId']);
+      if (!isValid) return;
+  
       setLoading(true);
       setServerError(null);
-
+  
+      // Format dates to ISO format (YYYY-MM-DD) for LocalDate in Java
+      const startDateFormatted = data.startDate ? data.startDate.toISOString().split('T')[0] : null;
+      const endDateFormatted = data.endDate ? data.endDate.toISOString().split('T')[0] : null;
+  
+      // Format the location data to match the backend Location model
+      const formattedStartLocation = {
+        name: startLocation?.name || '',
+        // Try to extract city and country from address if available
+        city: startLocation?.address ? extractCity(startLocation.address) : '',
+        country: startLocation?.address ? extractCountry(startLocation.address) : '',
+        latitude: startLocation?.lat || null,
+        longitude: startLocation?.lng || null,
+        description: '' // Optional field
+      };
+  
+      const formattedEndLocation = {
+        name: endLocation?.name || '',
+        city: endLocation?.address ? extractCity(endLocation.address) : '',
+        country: endLocation?.address ? extractCountry(endLocation.address) : '',
+        latitude: endLocation?.lat || null,
+        longitude: endLocation?.lng || null,
+        description: '' // Optional field
+      };
+  
+      // If we have an ID from the database, include it
+      if (startLocation?.id && !isNaN(parseInt(startLocation.id))) {
+        formattedStartLocation.id = parseInt(startLocation.id);
+      }
+      
+      if (endLocation?.id && !isNaN(parseInt(endLocation.id))) {
+        formattedEndLocation.id = parseInt(endLocation.id);
+      }
+  
       // Format data for API
       const tripData = {
-        ...data,
-        startLocation: { id: data.startLocationId },
-        endLocation: { id: data.endLocationId },
+        name: data.name,
+        startDate: startDateFormatted,
+        endDate: endDateFormatted,
+        startLocation: formattedStartLocation,
+        endLocation: formattedEndLocation,
+        status: data.status,
+        notes: data.description, // Map description to notes field
+        budget: 0, // Add a default budget since it's required
       };
-
-      // Remove the IDs that were just for the form
-      delete tripData.startLocationId;
-      delete tripData.endLocationId;
-
+  
+      console.log('Sending to API:', tripData);
+  
       if (isEdit && trip) {
         await tripService.updateTrip(trip.id, tripData);
       } else {
         await tripService.createTrip(tripData);
       }
-
+  
       setSuccess(true);
       setTimeout(() => {
         navigate('/trips');
@@ -138,9 +235,36 @@ function TripForm({ trip = null, isEdit = false }) {
       setLoading(false);
     }
   };
+  
+  // Helper functions to extract city and country from a formatted address
+  const extractCity = (address) => {
+    if (!address) return '';
+    // This is a simple implementation - you might need to adjust based on your address format
+    const addressParts = address.split(',');
+    if (addressParts.length > 1) {
+      return addressParts[0].trim();
+    }
+    return '';
+  };
+  
+  const extractCountry = (address) => {
+    if (!address) return '';
+    // This assumes the country is the last part of the address
+    const addressParts = address.split(',');
+    if (addressParts.length > 1) {
+      return addressParts[addressParts.length - 1].trim();
+    }
+    return '';
+  };
 
+  // Now you can have conditional returns, after all hooks are called
+  if (loadError) {
+    return <ErrorMessage error={`Error loading Google Maps: ${loadError.message}`} />;
+  }
+  
   if (locationsLoading) return <Loading message="Loading locations..." />;
   if (locationsError) return <ErrorMessage error={locationsError} />;
+  if (!isLoaded) return <Loading message="Loading Google Maps..." />;
 
   return (
     <Box>
@@ -174,31 +298,49 @@ function TripForm({ trip = null, isEdit = false }) {
                 <Controller
                   name="startLocationId"
                   control={control}
-                  render={({ field: { onChange, value, ...field } }) => (
-                    <Autocomplete
-                      options={locations}
-                      getOptionLabel={(option) => {
-                        // Handle both objects and IDs
-                        if (typeof option === 'object') return option.name;
-                        const location = locations.find(loc => loc.id === option);
-                        return location ? location.name : '';
-                      }}
-                      value={locations.find(loc => loc.id === value) || null}
-                      onChange={(_, newValue) => {
-                        onChange(newValue ? newValue.id : '');
-                      }}
-                      renderInput={(params) => (
+                  render={({ field }) => (
+                    <FormControl fullWidth error={!!errors.startLocationId}>
+                      {/* Remove duplicate InputLabel */}
+                      <GoogleAutocomplete
+                        onLoad={(autocomplete) => {
+                          startAutocompleteRef.current = autocomplete;
+                        }}
+                        onPlaceChanged={handleStartPlaceChanged}
+                      >
                         <TextField
-                          {...params}
-                          {...field}
-                          label="Start Location"
-                          variant="outlined"
-                          error={!!errors.startLocationId}
-                          helperText={errors.startLocationId?.message}
-                          required
-                        />
-                      )}
-                    />
+  {...field}
+  value={startLocation?.name || ''}
+  onChange={(e) => {
+    // Allow typing in the field
+    const newValue = e.target.value;
+    if (!newValue) {
+      setStartLocation(null);
+      field.onChange('');
+    } else {
+      // Update the value being displayed
+      setStartLocation({
+        ...startLocation,
+        name: newValue
+      });
+      // Don't call field.onChange() yet - let the place selection do that
+    }
+  }}
+  label="Start Location"
+  variant="outlined"
+  fullWidth
+  required
+  error={!!errors.startLocationId}
+  helperText={errors.startLocationId?.message}
+  sx={{ 
+    input: { 
+      color: 'black',
+      backgroundColor: 'white',
+      opacity: 1
+    }
+  }}
+/>
+                      </GoogleAutocomplete>
+                    </FormControl>
                   )}
                 />
               </Grid>
@@ -207,30 +349,49 @@ function TripForm({ trip = null, isEdit = false }) {
                 <Controller
                   name="endLocationId"
                   control={control}
-                  render={({ field: { onChange, value, ...field } }) => (
-                    <Autocomplete
-                      options={locations}
-                      getOptionLabel={(option) => {
-                        if (typeof option === 'object') return option.name;
-                        const location = locations.find(loc => loc.id === option);
-                        return location ? location.name : '';
-                      }}
-                      value={locations.find(loc => loc.id === value) || null}
-                      onChange={(_, newValue) => {
-                        onChange(newValue ? newValue.id : '');
-                      }}
-                      renderInput={(params) => (
+                  render={({ field }) => (
+                    <FormControl fullWidth error={!!errors.endLocationId}>
+                      {/* Remove duplicate InputLabel */}
+                      <GoogleAutocomplete
+                        onLoad={(autocomplete) => {
+                          endAutocompleteRef.current = autocomplete;
+                        }}
+                        onPlaceChanged={handleEndPlaceChanged}
+                      >
                         <TextField
-                          {...params}
-                          {...field}
-                          label="End Location"
-                          variant="outlined"
-                          error={!!errors.endLocationId}
-                          helperText={errors.endLocationId?.message}
-                          required
-                        />
-                      )}
-                    />
+  {...field}
+  value={endLocation?.name || ''}
+  onChange={(e) => {
+    // Allow typing in the field
+    const newValue = e.target.value;
+    if (!newValue) {
+      setEndLocation(null);
+      field.onChange('');
+    } else {
+      // Update the value being displayed
+      setEndLocation({
+        ...endLocation,
+        name: newValue
+      });
+      // Don't call field.onChange() yet - let the place selection do that
+    }
+  }}
+  label="End Location"
+  variant="outlined"
+  fullWidth
+  required
+  error={!!errors.endLocationId}
+  helperText={errors.endLocationId?.message}
+  sx={{ 
+    input: { 
+      color: 'black',
+      backgroundColor: 'white',
+      opacity: 1
+    }
+  }}
+/>
+                      </GoogleAutocomplete>
+                    </FormControl>
                   )}
                 />
               </Grid>
@@ -245,15 +406,17 @@ function TripForm({ trip = null, isEdit = false }) {
                         label="Start Date"
                         value={field.value}
                         onChange={(date) => field.onChange(date)}
-                        renderInput={(params) => (
-                          <TextField
-                            {...params}
-                            fullWidth
-                            required
-                            error={!!errors.startDate}
-                            helperText={errors.startDate?.message}
-                          />
-                        )}
+                        slots={{
+                          textField: TextField
+                        }}
+                        slotProps={{
+                          textField: {
+                            fullWidth: true,
+                            required: true,
+                            error: !!errors.startDate,
+                            helperText: errors.startDate?.message
+                          }
+                        }}
                       />
                     )}
                   />
@@ -270,15 +433,17 @@ function TripForm({ trip = null, isEdit = false }) {
                         label="End Date"
                         value={field.value}
                         onChange={(date) => field.onChange(date)}
-                        renderInput={(params) => (
-                          <TextField
-                            {...params}
-                            fullWidth
-                            required
-                            error={!!errors.endDate}
-                            helperText={errors.endDate?.message}
-                          />
-                        )}
+                        slots={{
+                          textField: TextField
+                        }}
+                        slotProps={{
+                          textField: {
+                            fullWidth: true,
+                            required: true,
+                            error: !!errors.endDate,
+                            helperText: errors.endDate?.message
+                          }
+                        }}
                       />
                     )}
                   />
