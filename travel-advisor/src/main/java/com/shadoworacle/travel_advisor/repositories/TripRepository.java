@@ -5,6 +5,7 @@ import org.springframework.stereotype.Repository;
 import com.shadoworacle.travel_advisor.models.Trip;
 import java.util.List;
 import com.shadoworacle.travel_advisor.models.TripStatus;
+import java.math.BigDecimal;
 @Repository
 public interface TripRepository extends JpaRepository<Trip, Long> {
     List<Trip> findByStatus(TripStatus status);
@@ -12,4 +13,5 @@ public interface TripRepository extends JpaRepository<Trip, Long> {
     List<Trip> findByEndLocation(Trip endLocation);
     List<Trip> findByStartDateBetween(Trip startDate, Trip endDate);
     List<Trip> findByName(Trip name);
+    List<Trip> findByBudget(BigDecimal budget);
 }

@@ -27,7 +27,7 @@ import tripService from '../../services/tripService';
 import Loading from '../common/Loading';
 import ErrorMessage from '../common/ErrorMessage';
 import { useJsApiLoader, Autocomplete as GoogleAutocomplete } from '@react-google-maps/api';
-
+import InputAdornment from '@mui/material/InputAdornment';
 // Form validation schema
 const schema = yup.object().shape({
   name: yup.string().required('Trip name is required'),
@@ -44,8 +44,10 @@ const schema = yup.object().shape({
     .typeError('Please enter a valid date'),
   startLocationId: yup.string().required('Start location is required'),
   endLocationId: yup.string().required('End location is required'),
+  budget: yup.number().typeError('Budget must be a number').min(0, 'Budget cannot be negative').required('Budget is required'),
   status: yup.string().required('Status is required'),
   description: yup.string(),
+
 });
 
 // Trip statuses
@@ -101,6 +103,7 @@ function TripForm({ trip = null, isEdit = false }) {
       endLocationId: '',
       status: 'PLANNED',
       description: '',
+      budget: 0,
     },
   });
 
@@ -115,6 +118,7 @@ function TripForm({ trip = null, isEdit = false }) {
         endLocationId: trip.endLocation?.id || '',
         status: trip.status || 'PLANNED',
         description: trip.description || '',
+        budget: trip.budget || 0,
       });
       
       // Also set the full location objects
@@ -213,7 +217,7 @@ function TripForm({ trip = null, isEdit = false }) {
         endLocation: formattedEndLocation,
         status: data.status,
         notes: data.description, // Map description to notes field
-        budget: 0, // Add a default budget since it's required
+        budget: data.budget,
       };
   
       console.log('Sending to API:', tripData);
@@ -225,9 +229,10 @@ function TripForm({ trip = null, isEdit = false }) {
       }
   
       setSuccess(true);
-      setTimeout(() => {
-        navigate('/trips');
-      }, 1500);
+      setSuccess(true);
+setTimeout(() => {
+  navigate('/trips?refresh=' + new Date().getTime());
+}, 1500);
     } catch (error) {
       console.error('Error saving trip:', error);
       setServerError(error.message || 'Error saving trip');
@@ -422,6 +427,27 @@ function TripForm({ trip = null, isEdit = false }) {
                   />
                 </LocalizationProvider>
               </Grid>
+              <Grid item xs={12} sm={6}>
+  <Controller
+    name="budget"
+    control={control}
+    render={({ field }) => (
+      <TextField
+        {...field}
+        label="Budget"
+        variant="outlined"
+        fullWidth
+        type="number"
+        InputProps={{
+          startAdornment: <InputAdornment position="start">$</InputAdornment>,
+        }}
+        error={!!errors.budget}
+        helperText={errors.budget?.message}
+        required
+      />
+    )}
+  />
+</Grid>
 
               <Grid item xs={12} sm={6}>
                 <LocalizationProvider dateAdapter={AdapterDateFns}>

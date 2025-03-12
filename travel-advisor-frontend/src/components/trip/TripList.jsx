@@ -17,6 +17,8 @@ import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import { useTrips } from '../../hooks/entityHooks';
 import Loading from '../common/Loading';
 import ErrorMessage from '../common/ErrorMessage';
+import { useLocation } from 'react-router-dom';
+
 
 // Helper function to get status color
 const getStatusColor = (status) => {
@@ -44,11 +46,20 @@ const formatDate = (dateString) => {
 
 function TripList() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { loading, error, data: trips, execute: refreshTrips } = useTrips();
 
+  // Add this useEffect to refresh when the component mounts or URL changes
+  React.useEffect(() => {
+    console.log("TripList component mounted or URL changed - refreshing trips");
+    refreshTrips();
+  }, [location.search, refreshTrips]);
+
+  
   if (loading) return <Loading message="Loading trips..." />;
   if (error) return <ErrorMessage error={error} onRetry={refreshTrips} />;
 
+  
   return (
     <div>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>

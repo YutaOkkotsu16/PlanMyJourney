@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Spring Boot-TravelAdvisorApplication<travel-advisor>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.shadoworacle.travel_advisor.TravelAdvisorApplication",
+            "projectName": "travel-advisor",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}
