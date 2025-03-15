@@ -222,11 +222,14 @@ function TripForm({ trip = null, isEdit = false }) {
   
       console.log('Sending to API:', tripData);
   
+      // In the onSubmit function, add the ID to tripData when editing
       if (isEdit && trip) {
-        await tripService.updateTrip(trip.id, tripData);
-      } else {
+      // Include the trip ID in the data sent to the server
+          tripData.id = trip.id;
+          await tripService.updateTrip(trip.id, tripData);
+        } else {
         await tripService.createTrip(tripData);
-      }
+        }
   
       setSuccess(true);
       setSuccess(true);

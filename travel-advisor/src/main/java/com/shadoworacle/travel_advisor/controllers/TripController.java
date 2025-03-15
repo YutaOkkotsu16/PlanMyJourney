@@ -36,6 +36,7 @@ public class TripController {
 
     @PutMapping("/{id}")
     public Trip updateTrip(@PathVariable Long id, @RequestBody Trip trip) {
+        trip.setId(id);
         return tripService.updateTrip(trip);
     }
 
